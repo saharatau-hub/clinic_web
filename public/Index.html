@@ -1,149 +1,81 @@
 <!doctype html>
 <html lang="th">
 <head>
-<meta charset="utf-8" />
-<title>Transkriptor → OPD Card (Desktop)</title>
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<style>
-  :root{--muted:#666;--line:#e5e7eb;--accent:#2563eb;--ok:#0a7d39;--err:#c00}
-  *{box-sizing:border-box} body{font-family:system-ui,Segoe UI,Arial,sans-serif;margin:0;padding:20px;background:#fafafa}
-  h1{margin:0 0 12px;font-size:22px}
-  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-  select,button,input[type=file]{padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:#fff}
-  button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
-  button:disabled{opacity:.5;cursor:not-allowed}
-  progress{width:200px;height:10px}
-  .muted{color:var(--muted);font-size:12px}
-  .card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px;margin:12px 0}
-  textarea{width:100%;min-height:180px;border:1px solid var(--line);border-radius:10px;padding:10px}
-  .cols{display:grid;grid-template-columns:1fr;gap:12px}
-  @media (min-width:1024px){.cols{grid-template-columns:1fr 1fr}}
-  .status{margin-top:6px} .ok{color:var(--ok)} .err{color:var(--err)}
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Clinic Web App – OPD Card Generator</title>
+  <style>
+    body { font-family: sans-serif; max-width: 960px; margin: 40px auto; line-height: 1.5; }
+    h1 { color: #2563eb; }
+    textarea { width: 100%; height: 200px; padding: 8px; border: 1px solid #ccc; border-radius: 8px; }
+    button { margin-top: 8px; padding: 8px 12px; border: none; border-radius: 8px; cursor: pointer; }
+    .primary { background: #2563eb; color: white; }
+    select, input[type="file"] { margin-top: 10px; padding: 6px; }
+    .output { margin-top: 20px; border: 1px solid #ccc; border-radius: 8px; padding: 10px; background: #f9f9f9; white-space: pre-wrap; }
+  </style>
 </head>
 <body>
-  <h1>Transkriptor → OPD Card (Desktop)</h1>
+  <h1>🧠 Clinic Web App</h1>
+  <p>ระบบสรุปข้อความเสียง/ข้อความให้อยู่ในรูปแบบ OPD Card ตามแผนก</p>
 
-  <div class="card">
-    <div class="row">
-      <label>ไมโครโฟน</label>
-      <select id="mic"></select>
-      <progress id="vu" max="1" value="0"></progress>
+  <label>เลือก Template:</label>
+  <select id="template">
+    <option value="internal">อายุรกรรม</option>
+    <option value="neurology">ประสาทวิทยา</option>
+    <option value="pediatrics">กุมารเวช</option>
+    <option value="pt">กายภาพบำบัด</option>
+    <option value="neurosurgery">ศัลยกรรมประสาท</option>
+    <option value="ophthalmology">จักษุ</option>
+    <option value="soap">SOAP Note</option>
+  </select>
 
-      <label>รูปแบบบันทึก</label>
-      <select id="tpl">
-        <option value="internal">อายุรแพทย์ (Internal)</option>
-        <option value="neurology">ประสาทวิทยา (Neurology)</option>
-        <option value="soap">SOAP</option>
-        <option value="pt">กายภาพบำบัด (Physical Therapy)</option>
-        <option value="neurosurgery">ศัลยกรรมประสาท</option>
-        <option value="ophthalmology">จักษุ/ตา</option>
-      </select>
+  <h3>1️⃣ อัปโหลดไฟล์เสียง</h3>
+  <input type="file" id="file" accept="audio/*">
+  <button id="uploadBtn" class="primary">อัปโหลดและสรุป</button>
 
-      <button id="rec" class="primary">● เริ่มบันทึกเสียง</button>
-      <button id="stop" disabled>■ หยุด</button>
-      <input id="pick" type="file" accept="audio/*" />
-      <button id="send">⬆️ ส่งไฟล์ขึ้นเซิร์ฟเวอร์</button>
-      <span id="t" class="muted">00:00</span>
-    </div>
-    <div class="muted" style="margin-top:6px">บันทึกเสียงเพื่อถอดเสียงอัตโนมัติ หรือเลือกไฟล์เสียงแล้วกดส่ง (ระบบจะสรุปตามรูปแบบที่เลือก)</div>
-    <div id="stat" class="status muted">พร้อม</div>
-  </div>
+  <h3>2️⃣ หรือพิมพ์ข้อความเอง</h3>
+  <textarea id="text" placeholder="พิมพ์ข้อความที่ต้องการสรุป..."></textarea>
+  <button id="summarizeBtn" class="primary">สรุปข้อความ</button>
 
-  <div class="cols">
-    <div class="card">
-      <div class="row"><strong>Transcript (ข้อความถอดเสียง)</strong><span class="muted">แก้ไขได้</span><button id="clr" style="margin-left:auto">ล้าง</button></div>
-      <textarea id="raw" placeholder="ข้อความจากการถอดเสียงจะอยู่ที่นี่ หรือวางข้อความเองได้"></textarea>
-      <div class="row" style="margin-top:8px"><button id="sum" class="primary">สรุปเป็น OPD Card</button></div>
-    </div>
-    <div class="card">
-      <div class="row"><strong>ผลลัพธ์ OPD Card</strong><button id="copy" style="margin-left:auto">Copy</button><button id="save">Save .txt</button></div>
-      <textarea id="out" placeholder="ผลสรุปจะปรากฏที่นี่"></textarea>
-    </div>
-  </div>
+  <h3>📄 ผลลัพธ์</h3>
+  <div id="result" class="output">รอผลลัพธ์...</div>
 
-<script>
-const API = 'http://localhost:3001';
-const $ = id => document.getElementById(id);
-const mic = $('mic'), vu = $('vu'), tpl = $('tpl'),
-      rec = $('rec'), stopBtn = $('stop'), pick = $('pick'), send = $('send'),
-      t = $('t'), stat = $('stat'), raw = $('raw'), out = $('out'),
-      sum = $('sum'), copyBtn = $('copy'), saveBtn = $('save'), clr = $('clr');
+  <script>
+    const summarizeBtn = document.getElementById('summarizeBtn');
+    const uploadBtn = document.getElementById('uploadBtn');
+    const fileInput = document.getElementById('file');
+    const textInput = document.getElementById('text');
+    const resultDiv = document.getElementById('result');
+    const templateSel = document.getElementById('template');
 
-let mediaRecorder, chunks=[], blob=null, sec=0, timerInt, ac, analyser, rafId;
+    async function summarizeText() {
+      const text = textInput.value.trim();
+      const template = templateSel.value;
+      if (!text) return alert('กรุณาใส่ข้อความ');
+      resultDiv.textContent = '⏳ กำลังสรุป...';
+      const res = await fetch('/summarize-from-text', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ text, template })
+      });
+      const data = await res.json();
+      resultDiv.textContent = data.ok ? data.summary : '❌ ' + data.error;
+    }
 
-function setStatus(msg, cls='muted'){ stat.textContent = msg; stat.className = 'status '+cls; }
-function fmt(n){ return String(n).padStart(2,'0'); }
-function tick(){ sec++; t.textContent = `${fmt(sec/60|0)}:${fmt(sec%60)}`; }
+    async function uploadFile() {
+      const file = fileInput.files[0];
+      if (!file) return alert('กรุณาเลือกไฟล์เสียง');
+      const template = templateSel.value;
+      const fd = new FormData();
+      fd.append('audio', file);
+      resultDiv.textContent = '⏳ กำลังอัปโหลดและสรุป...';
+      const res = await fetch(`/upload-audio-and-summarize?template=${template}`, { method: 'POST', body: fd });
+      const data = await res.json();
+      resultDiv.textContent = data.ok ? data.summary : '❌ ' + data.error;
+    }
 
-async function listMics(){
-  const devs = await navigator.mediaDevices.enumerateDevices();
-  const mics = devs.filter(d=>d.kind==='audioinput');
-  mic.innerHTML = mics.map((m,i)=>`<option value="${m.deviceId}">${m.label||'Microphone '+(i+1)}</option>`).join('');
-  if (!mics.length) mic.innerHTML = '<option>ไม่พบไมโครโฟน</option>';
-}
-
-function startVU(stream){
-  ac = new (window.AudioContext||window.webkitAudioContext)();
-  const src = ac.createMediaStreamSource(stream);
-  analyser = ac.createAnalyser(); src.connect(analyser);
-  const arr = new Uint8Array(analyser.frequencyBinCount);
-  (function loop(){ analyser.getByteFrequencyData(arr); vu.value = arr.reduce((a,b)=>a+b,0)/arr.length/255; rafId = requestAnimationFrame(loop); })();
-}
-function stopVU(){ if (rafId) cancelAnimationFrame(rafId); if (ac) ac.close().catch(()=>{}); vu.value=0; }
-
-rec.onclick = async ()=>{
-  try{
-    const id = mic.value && mic.value!=='ไม่พบไมโครโฟน' ? {deviceId: mic.value} : true;
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: id });
-    chunks=[]; sec=0; t.textContent='00:00';
-    mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
-    mediaRecorder.ondataavailable = e=>chunks.push(e.data);
-    mediaRecorder.onstop = ()=>{ blob = new Blob(chunks,{type:'audio/webm'}); setStatus(`บันทึกเสร็จ (${(blob.size/1024/1024).toFixed(2)} MB)`,'ok'); clearInterval(timerInt); stopVU(); };
-    mediaRecorder.start(); startVU(stream); timerInt = setInterval(tick,1000);
-    rec.disabled=true; stopBtn.disabled=false; setStatus('กำลังบันทึก…');
-  }catch(e){ setStatus('เริ่มบันทึกไม่สำเร็จ: '+e.message,'err'); }
-};
-stopBtn.onclick = ()=>{ try{ mediaRecorder?.stop(); }catch{} rec.disabled=false; stopBtn.disabled=true; };
-
-send.onclick = async ()=>{
-  try{
-    let fileObj;
-    if (pick.files && pick.files.length) fileObj = pick.files[0];
-    else if (blob) { fileObj = new Blob([blob], {type:'audio/webm'}); fileObj.name='record.webm'; }
-    else { alert('ยังไม่มีไฟล์เสียง'); return; }
-
-    const fd = new FormData();
-    fd.append('audio', new Blob([fileObj], {type: fileObj.type || 'audio/webm'}), fileObj.name || 'record.webm');
-    fd.append('template', tpl.value);
-
-    setStatus('อัปโหลด/ถอดเสียง/สรุป…');
-    const r = await fetch(`${API}/upload-audio-and-summarize`, { method:'POST', body: fd });
-    const j = await r.json();
-    if (j.ok){ raw.value = j.transcript || ''; out.value = j.summary || ''; setStatus('สำเร็จ: ได้ transcript + OPD','ok'); }
-    else setStatus('ผิดพลาด: '+(j.error||'ไม่ทราบสาเหตุ'),'err');
-  }catch(e){ setStatus('อัปโหลดล้มเหลว: '+e.message,'err'); }
-};
-
-sum.onclick = async ()=>{
-  const text = raw.value.trim(); if (!text){ alert('กรุณาใส่ข้อความ'); return; }
-  try{
-    setStatus('กำลังสรุป…');
-    const r = await fetch(`${API}/summarize-from-text`, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ text, template: tpl.value })
-    });
-    const j = await r.json();
-    if (j.ok){ out.value = j.summary || ''; setStatus('สรุปสำเร็จ','ok'); }
-    else setStatus('สรุปล้มเหลว: '+(j.error||'ไม่ทราบสาเหตุ'),'err');
-  }catch(e){ setStatus('สรุปล้มเหลว: '+e.message,'err'); }
-};
-
-copyBtn.onclick = async ()=>{ try{ await navigator.clipboard.writeText(out.value||''); setStatus('คัดลอกแล้ว','ok'); }catch(e){ setStatus('คัดลอกไม่สำเร็จ','err'); } };
-saveBtn.onclick = ()=>{ const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([out.value||''],{type:'text/plain'})); a.download='opd_summary.txt'; a.click(); setStatus('บันทึกไฟล์แล้ว','ok'); };
-clr.onclick = ()=>{ raw.value=''; setStatus('ล้าง transcript แล้ว'); };
-
-(async()=>{ try{ await navigator.mediaDevices.getUserMedia({audio:true}).then(s=>s.getTracks().forEach(t=>t.stop())); }catch{} await listMics(); setStatus('พร้อม'); })();
-</script>
+    summarizeBtn.onclick = summarizeText;
+    uploadBtn.onclick = uploadFile;
+  </script>
 </body>
 </html>

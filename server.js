@@ -1,110 +1,101 @@
+// -------------------------------
+// Clinic Web Server - Final Version
+// -------------------------------
 import express from "express";
+import cors from "cors";
+import path from "path";
+import { fileURLToPath } from "url";
 import multer from "multer";
 import fs from "fs";
-import cors from "cors";
 import OpenAI from "openai";
 
 const app = express();
-app.use(express.json());
-app.use(cors());
-
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY || "YOUR_API_KEY_HERE",
-});
-
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 const upload = multer({ dest: "uploads/" });
+const port = process.env.PORT || 10000;
+const apiKey = process.env.OPENAI_API_KEY;
 
-// 🧩 Template: ฟังก์ชันสร้างข้อความสรุปตามหมวด
-function generateTemplate(text, templateType) {
-  const templates = {
-    neurology: `
-**OPD Neurology Note**
-- Chief Complaint: ${text}
-- History: ประเมิน neurological deficit, reflex, sensory, motor function
-- Assessment: วินิจฉัยตามข้อมูลทางระบบประสาท
-- Plan: สั่งตรวจ MRI/CT ถ้าสงสัย lesion, ให้ยาตามอาการ, นัดติดตาม
-- Advice: แจ้งอาการ red flag เช่น แขนขาอ่อนแรงทันที
-    `,
-    internal: `
-**OPD Internal Medicine Note**
-- Chief Complaint: ${text}
-- History: ทบทวนระบบหัวใจ ปอด ไต ตับ
-- Assessment: พิจารณาโรคทั่วไป เช่น ความดัน เบาหวาน
-- Plan: ตรวจ CBC, LFT, Electrolyte
-- Advice: ปรับพฤติกรรมการกิน ออกกำลังกาย
-    `,
-    physical: `
-**Rehabilitation/Physical Therapy Note**
-- Chief Complaint: ${text}
-- Observation: ตรวจ range of motion, balance
-- Treatment: กายภาพบำบัด, ยืดเหยียด, ฝึกเดิน
-- Advice: ทำ exercise ต่อเนื่องที่บ้าน
-    `,
-    neurosurgery: `
-**Neurosurgery Note**
-- Chief Complaint: ${text}
-- History: ประวัติ trauma, mass effect, intracranial lesion
-- Plan: พิจารณาผ่าตัดหรือส่งต่อประสาทศัลยกรรม
-- Advice: ติดตามผลภาพถ่ายรังสีและอาการทาง motor
-    `,
-    ophthalmology: `
-**Ophthalmology Note**
-- Chief Complaint: ${text}
-- Examination: ตรวจ visual acuity, fundus, intraocular pressure
-- Assessment: พิจารณา optic neuritis, glaucoma, cataract
-- Plan: ให้ยาหยอดตา, นัด follow-up
-    `
-  };
-
-  return templates[templateType] || templates["internal"];
+if (!apiKey) {
+  console.error("❌ Missing OPENAI_API_KEY");
+  process.exit(1);
 }
 
-// 🧾 สรุปจากข้อความโดยตรง
+const client = new OpenAI({ apiKey });
+app.use(cors());
+app.use(express.json());
+app.use(express.static(path.join(__dirname, "public")));
+
+// ===============================
+// ROUTE: root
+// ===============================
+app.get("/", (_req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
+
+// ===============================
+// ROUTE: summarize-from-text
+// ===============================
 app.post("/summarize-from-text", async (req, res) => {
   try {
-    const { text, template } = req.body;
-    if (!text) return res.status(400).json({ ok: false, error: "Missing text" });
+    const { text, template = "neurology" } = req.body;
+    if (!text) return res.json({ ok: false, error: "missing text" });
 
+    const prompt = `สรุปข้อความต่อไปนี้ให้อยู่ในรูปแบบ OPD Card (${template}):
+${text}`;
     const completion = await client.chat.completions.create({
       model: "gpt-4o-mini",
-      messages: [
-        { role: "system", content: "You are a Thai medical summarization assistant." },
-        { role: "user", content: `สรุปข้อความต่อไปนี้เป็น OPD card ภาษาไทย:\n${generateTemplate(text, template)}` }
-      ],
+      messages: [{ role: "user", content: prompt }],
     });
 
-    const result = completion.choices[0].message.content;
-    res.json({ ok: true, summary: result });
+    const summary = completion.choices[0].message.content;
+    res.json({ ok: true, summary });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ ok: false, error: err.message });
+    res.json({ ok: false, error: err.message });
   }
 });
 
-// 🎙️ อัปโหลดเสียงและสรุปอัตโนมัติ
-app.post("/upload-audio-and-summarize", upload.single("audio"), async (req, res) => {
-  try {
-    const filePath = req.file.path;
-    const { template } = req.query;
+// ===============================
+// ROUTE: upload-audio-and-summarize
+// ===============================
+app.post(
+  "/upload-audio-and-summarize",
+  upload.single("audio"),
+  async (req, res) => {
+    try {
+      if (!req.file) return res.json({ ok: false, error: "missing file" });
 
-    const transcript = await client.audio.transcriptions.create({
-      file: fs.createReadStream(filePath),
-      model: "gpt-4o-mini-transcribe",
-      language: "th",
-    });
+      const template = req.query.template || "internal";
+      const audioPath = path.resolve(req.file.path);
 
-    const summary = generateTemplate(transcript.text, template);
-    fs.unlinkSync(filePath);
-    res.json({ ok: true, transcript: transcript.text, summary });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ ok: false, error: err.message });
+      const transcription = await client.audio.transcriptions.create({
+        file: fs.createReadStream(audioPath),
+        model: "gpt-4o-mini-transcribe",
+      });
+
+      const text = transcription.text || "(ไม่สามารถถอดเสียงได้)";
+      const prompt = `สรุปข้อความให้อยู่ในรูปแบบ OPD Card (${template}): ${text}`;
+
+      const completion = await client.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [{ role: "user", content: prompt }],
+      });
+
+      const summary = completion.choices[0].message.content;
+      res.json({ ok: true, summary });
+    } catch (err) {
+      console.error(err);
+      res.json({ ok: false, error: err.message });
+    } finally {
+      if (req.file) fs.unlinkSync(req.file.path);
+    }
   }
-});
+);
 
-app.get("/", (req, res) => {
-  res.send("✅ Clinic Web Server is running!");
+// ===============================
+// START SERVER
+// ===============================
+app.listen(port, () => {
+  console.log(`✅ Server running on port ${port}`);
 });
-
-const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
