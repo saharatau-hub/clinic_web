@@ -1,23 +1,31 @@
 // server.js
 import express from "express";
 import cors from "cors";
-import fileUpload from "express-fileupload";
+import multer from "multer";
 import fs from "fs";
 import path from "path";
 import OpenAI from "openai";
 
 const app = express();
-app.use(cors());
-app.use(express.json({ limit: "12mb" }));
-app.use(fileUpload());
-app.use(express.static("public")); // เสิร์ฟ index.html ถ้ามี
 
-// ---------- ตั้งค่า OpenAI ----------
+// --- CORS ---
+const allow = (process.env.ALLOW_ORIGINS || "").split(",").map(s => s.trim()).filter(Boolean);
+app.use(cors(allow.length ? { origin: allow } : undefined));
+
+// --- Body parsers ---
+app.use(express.json({ limit: "12mb" }));
+
+// --- Static web (./public/index.html) ---
+app.use(express.static("public"));
+
+// --- OpenAI client ---
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+// ใช้โมเดลที่เบาและไวสำหรับเว็บ
 const CHAT_MODEL = "gpt-4o-mini";
 const STT_MODEL  = "gpt-4o-mini-transcribe";
 
-// ---------- เทมเพลต/รูปแบบการสรุปตามสาขา ----------
+// --- Templates (ไทย) ---
 const TEMPLATE_RULES = {
   "อายุรกรรม": {
     title: "แบบบันทึก OPD Card (อายุรกรรม)",
@@ -61,7 +69,7 @@ const TEMPLATE_RULES = {
       "คำแนะนำผู้ป่วย (home program/precaution)",
       "บันทึกสำหรับแพทย์ (ตัวชี้วัดที่ติดตามครั้งหน้า)"
     ],
-    style: "เป็นหัวข้อสั้นชัดเจน ใส่ตัวเลข/ค่าที่วัดได้ ถ้ามี"
+    style: "ภาษากายภาพบำบัด ชัดเจนต่อการติดตาม"
   },
 
   "ศัลยกรรมประสาท": {
@@ -109,7 +117,7 @@ const TEMPLATE_RULES = {
   }
 };
 
-// ---------- ตัวช่วยสร้างพรอมป์ภาษาไทยตามเทมเพลต ----------
+// ---------- Prompt builder ----------
 function buildThaiPrompt(text, templateKey = "ทั่วไป") {
   const t = TEMPLATE_RULES[templateKey] || TEMPLATE_RULES["ทั่วไป"];
   return `
@@ -131,7 +139,6 @@ ${text}
 `.trim();
 }
 
-// ---------- ฟังก์ชันสรุป ----------
 async function summarizeThai(text, templateKey) {
   const messages = [
     { role: "system", content: "คุณคือแพทย์ที่สรุปเวชระเบียนเป็นภาษาไทยแบบมืออาชีพและปลอดภัย" },
@@ -147,66 +154,56 @@ async function summarizeThai(text, templateKey) {
   return resp.choices?.[0]?.message?.content?.trim() || "";
 }
 
-// ---------- Endpoint: สรุปจากข้อความ ----------
-app.post("/summarize-from-text", async (req, res) => {
+// ---------- Upload endpoint (multer memory) ----------
+const upload = multer({ storage: multer.memoryStorage() });
+
+app.post("/upload-audio-and-summarize", upload.single("audio"), async (req, res) => {
   try {
-    const { text = "", template = "ทั่วไป" } = req.body || {};
-    if (!text.trim()) return res.status(400).json({ ok:false, error:"กรุณาใส่ข้อความ" });
+    if (!req.file) return res.status(400).json({ ok: false, error: "ไม่มีไฟล์เสียง" });
 
-    const summary = await summarizeThai(text, template);
-    return res.json({ ok:true, summary });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ ok:false, error: err.message });
-  }
-});
+    const template = String(req.query.template || "ทั่วไป");
 
-// ---------- Endpoint: อัปโหลดเสียงแล้วสรุป ----------
-app.post("/upload-audio-and-summarize", async (req, res) => {
-  try {
-    if (!req.files?.audio) return res.status(400).json({ ok:false, error:"ไม่มีไฟล์เสียง" });
+    // เขียนเป็นไฟล์ชั่วคราว (บาง SDK ต้องการ path/stream)
+    const tempPath = path.join(process.cwd(), `temp_${Date.now()}.bin`);
+    fs.writeFileSync(tempPath, req.file.buffer);
 
-    const template = req.query.template || "ทั่วไป";
-    const f = req.files.audio;
-
-    // ตรวจชนิดไฟล์คร่าว ๆ
-    const allowed = ["audio/wav","audio/x-wav","audio/mpeg","audio/mp3","audio/mp4","audio/m4a","audio/webm","audio/ogg","audio/oga","audio/flac","video/mp4"];
-    if (f.mimetype && !allowed.includes(f.mimetype)) {
-      // รับไว้ก่อนเพราะ mimetype บนบางเครื่องไม่ตรง; ให้ลองส่งเข้าระบบ STT ถ้า error ค่อยตอบกลับ
-      console.warn("⚠️ Unusual mimetype:", f.mimetype);
-    }
-
-    // บันทึกไฟล์ชั่วคราว
-    const tempPath = path.join(process.cwd(), `temp_${Date.now()}_${f.name.replace(/\s+/g,"_")}`);
-    await f.mv(tempPath);
-
-    // ถอดเสียง → ข้อความ (ไทย)
+    // Speech-to-Text (ไทย)
     const transcript = await openai.audio.transcriptions.create({
       model: STT_MODEL,
       file: fs.createReadStream(tempPath),
-      response_format: "text" // ข้อความล้วน
+      response_format: "text"
     });
 
-    // ลบไฟล์ชั่วคราว
-    fs.unlink(tempPath, ()=>{});
+    fs.unlink(tempPath, () => {});
 
-    // สรุปเป็น OPD Card ภาษาไทย ตามเทมเพลต
     const summary = await summarizeThai(transcript, template);
-
-    return res.json({ ok:true, transcript, summary });
+    return res.json({ ok: true, transcript, summary });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ ok:false, error: err.message });
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
-// ---------- หน้าเว็บหลัก ----------
-app.get("/", (req,res)=>{
-  // ถ้าไม่มี public/index.html ให้โชว์หน้าเช็คสถานะ
-  const p = path.join(process.cwd(),"public","index.html");
+// ---------- Summarize-from-text ----------
+app.post("/summarize-from-text", async (req, res) => {
+  try {
+    const { text = "", template = "ทั่วไป" } = req.body || {};
+    if (!text.trim()) return res.status(400).json({ ok: false, error: "ไม่มีข้อความ" });
+    const summary = await summarizeThai(text, template);
+    res.json({ ok: true, summary });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ---------- Health / Root ----------
+app.get("/healthz", (_, res) => res.json({ ok: true }));
+app.get("/", (req, res) => {
+  const p = path.join(process.cwd(), "public", "index.html");
   if (fs.existsSync(p)) return res.sendFile(p);
   res.type("html").send(`<p>✅ Clinic Web Server is running!</p>`);
 });
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, ()=> console.log(`✅ Server running on port ${PORT}`));
+app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
