@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Clinic Web – OPD Card</title>
+  <style>
+    body { font-family: system-ui, Segoe UI, Arial, sans-serif; max-width: 960px; margin: 36px auto; padding: 0 16px; line-height: 1.5; }
+    h1 { color: #2563eb; }
+    textarea { width: 100%; height: 200px; padding: 10px; border: 1px solid #d1d5db; border-radius: 10px; }
+    select, input[type=file], button { margin-top: 8px; }
+    .btn { padding: 8px 12px; border-radius: 8px; border: 0; cursor: pointer; }
+    .primary { background:#2563eb; color:#fff; }
+    .out { white-space: pre-wrap; background:#f9fafb; border:1px solid #e5e7eb; border-radius:10px; padding:12px; margin-top:12px; }
+  </style>
+</head>
+<body>
+  <h1>🧠 Clinic Web – OPD Card</h1>
+  <p>ถ้าเห็นหน้านี้ แสดงว่าหน้าเว็บทำงานแล้ว</p>
+
+  <label>Template:</label>
+  <select id="template">
+    <option value="internal">อายุรกรรม</option>
+    <option value="neurology">ประสาทวิทยา</option>
+    <option value="soap">SOAP</option>
+    <option value="pt">กายภาพบำบัด</option>
+    <option value="neurosurgery">ศัลยกรรมประสาท</option>
+    <option value="ophthalmology">จักษุ</option>
+  </select>
+
+  <h3>อัปโหลดเสียง</h3>
+  <input id="file" type="file" accept="audio/*" />
+  <button id="uploadBtn" class="btn primary">อัปโหลดและสรุป</button>
+
+  <h3>หรือพิมพ์ข้อความ</h3>
+  <textarea id="text" placeholder="พิมพ์ข้อความเพื่อสรุป…"></textarea><br/>
+  <button id="sumBtn" class="btn primary">สรุปข้อความ</button>
+
+  <h3>ผลลัพธ์</h3>
+  <div id="out" class="out">รอผล…</div>
+
+<script>
+const T = () => document.getElementById('template').value;
+const out = document.getElementById('out');
+
+document.getElementById('sumBtn').onclick = async () => {
+  const text = document.getElementById('text').value.trim();
+  if (!text) return alert('กรุณาใส่ข้อความ');
+  out.textContent = '⏳ กำลังสรุป…';
+  const r = await fetch('/summarize-from-text', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ text, template: T() })
+  });
+  const j = await r.json();
+  out.textContent = j.ok ? j.summary : '❌ ' + j.error;
+};
+
+document.getElementById('uploadBtn').onclick = async () => {
+  const f = document.getElementById('file').files[0];
+  if (!f) return alert('กรุณาเลือกไฟล์เสียง');
+  out.textContent = '⏳ กำลังถอดเสียง…';
+  const fd = new FormData(); fd.append('audio', f);
+  const r = await fetch('/upload-audio-and-summarize?template=' + encodeURIComponent(T()), {
+    method: 'POST', body: fd
+  });
+  const j = await r.json();
+  out.textContent = j.ok ? j.summary : '❌ ' + j.error;
+};
+</script>
+</body>
+</html>
